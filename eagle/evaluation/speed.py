@@ -1,10 +1,11 @@
 import json
 from transformers import AutoTokenizer
 import numpy as np
+import os
 
-tokenizer=AutoTokenizer.from_pretrained("/home/lyh/weights/hf/llama2chat/13B/")
-jsonl_file = "llama-2-chat-70b-fp16-ea-in-temperature-0.0.jsonl"
-jsonl_file_base = "llama-2-chat-70b-fp16-base-in-temperature-0.0.jsonl"
+tokenizer=AutoTokenizer.from_pretrained(os.environ["MODEL_PATH"])
+jsonl_file = "mt_bench/llama32_eagle.jsonl"
+jsonl_file_base = "mt_bench/llama32_base.jsonl"
 data = []
 with open(jsonl_file, 'r', encoding='utf-8') as file:
     for line in file:

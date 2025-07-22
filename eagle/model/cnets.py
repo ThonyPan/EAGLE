@@ -113,7 +113,17 @@ class LlamaRotaryEmbedding(torch.nn.Module):
         self.dim = dim
         self.max_position_embeddings = max_position_embeddings
         self.base = base
-        inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
+        # inv_freq = 1.0 / (self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim))
+        import os
+        from transformers import LlamaConfig
+        from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+        config = LlamaConfig.from_pretrained(os.environ["MODEL_PATH"])
+        if hasattr(config, "rope_scaling") and config.rope_scaling is not None:
+            rope_type = config.rope_scaling.get("rope_type", config.rope_scaling.get("type"))
+        else:
+            rope_type = "default"
+        inv_freq, _ = ROPE_INIT_FUNCTIONS[rope_type](config, device)
+
         self.register_buffer("inv_freq", inv_freq, persistent=False)
 
         # Build here to make `torch.jit.trace` work.
@@ -217,27 +227,9 @@ class LlamaAttention(nn.Module):
         self._init_rope()
 
     def _init_rope(self):
-        if self.config.rope_scaling is None:
-            if hasattr(self.config, "rope_theta"):
-                self.rotary_emb = LlamaRotaryEmbedding(self.head_dim,
-                                                       max_position_embeddings=self.max_position_embeddings,
-                                                       base=self.config.rope_theta)
-            else:
-                self.rotary_emb = LlamaRotaryEmbedding(self.head_dim,
-                                                       max_position_embeddings=self.max_position_embeddings)
-        else:
-            scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
-            if scaling_type == "linear":
-                self.rotary_emb = LlamaLinearScalingRotaryEmbedding(
-                    self.head_dim, max_position_embeddings=self.max_position_embeddings, scaling_factor=scaling_factor
-                )
-            elif scaling_type == "dynamic":
-                self.rotary_emb = LlamaDynamicNTKScalingRotaryEmbedding(
-                    self.head_dim, max_position_embeddings=self.max_position_embeddings, scaling_factor=scaling_factor
-                )
-            else:
-                raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
+        self.rotary_emb = LlamaRotaryEmbedding(self.head_dim,
+                                                max_position_embeddings=self.max_position_embeddings,
+                                                base=self.config.rope_theta)
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return tensor.view(bsz, seq_len, self.num_heads, self.head_dim).transpose(1, 2).contiguous()
@@ -481,9 +473,12 @@ class Model(nn.Module):
             from safetensors import safe_open
             import json
             try:
-                with open(os.path.join(path, "model.safetensors.index.json"), "r") as f:
-                    index_json = json.loads(f.read())
-                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                if os.path.exists(os.path.join(path, "model.safetensors.index.json")):
+                    with open(os.path.join(path, "model.safetensors.index.json"), "r") as f:
+                        index_json = json.loads(f.read())
+                        emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                else:
+                    emb_path = "model.safetensors"
                 with safe_open(os.path.join(path, emb_path),
                                framework="pt",
                                device="cpu") as f:
@@ -491,9 +486,12 @@ class Model(nn.Module):
                     vocab_size, hidden_dim = tensor_slice.get_shape()
                     tensor = tensor_slice[:, :hidden_dim].float()
             except:
-                with open(os.path.join(path, "pytorch_model.bin.index.json"), "r") as f:
-                    index_json = json.loads(f.read())
-                    emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                if os.path.exists(os.path.join(path, "pytorch_model.bin.index.json")):
+                    with open(os.path.join(path, "pytorch_model.bin.index.json"), "r") as f:
+                        index_json = json.loads(f.read())
+                        emb_path = index_json["weight_map"]["model.embed_tokens.weight"]
+                else:
+                    emb_path = "pytorch_model.bin"
                 weights = torch.load(os.path.join(path, emb_path))
                 tensor = weights["model.embed_tokens.weight"].float()
             self.embed_tokens.weight.data = tensor

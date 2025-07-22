@@ -150,9 +150,17 @@ class LlamaRotaryEmbedding(nn.Module):
         self.dim = dim
         self.max_position_embeddings = max_position_embeddings
         self.base = base
-        inv_freq = 1.0 / (
-                self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim)
-        )
+        # inv_freq = 1.0 / (
+        #         self.base ** (torch.arange(0, self.dim, 2).float().to(device) / self.dim)
+        # )
+        import os
+        from transformers.modeling_rope_utils import ROPE_INIT_FUNCTIONS
+        config = LlamaConfig.from_pretrained(os.environ["MODEL_PATH"])
+        if hasattr(config, "rope_scaling") and config.rope_scaling is not None:
+            rope_type = config.rope_scaling.get("rope_type", config.rope_scaling.get("type"))
+        else:
+            rope_type = "default"
+        inv_freq, _ = ROPE_INIT_FUNCTIONS[rope_type](config, device)
         self.register_buffer("inv_freq", inv_freq)
 
         # Build here to make `torch.jit.trace` work.
@@ -493,27 +501,9 @@ class LlamaAttention(nn.Module):
         self._init_rope()
 
     def _init_rope(self):
-        if self.config.rope_scaling is None:
-            self.rotary_emb = LlamaRotaryEmbedding(
-                self.head_dim, max_position_embeddings=self.max_position_embeddings,base=self.config.rope_theta
-            )
-        else:
-            scaling_type = self.config.rope_scaling["type"]
-            scaling_factor = self.config.rope_scaling["factor"]
-            if scaling_type == "linear":
-                self.rotary_emb = LlamaLinearScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                )
-            elif scaling_type == "dynamic":
-                self.rotary_emb = LlamaDynamicNTKScalingRotaryEmbedding(
-                    self.head_dim,
-                    max_position_embeddings=self.max_position_embeddings,
-                    scaling_factor=scaling_factor,
-                )
-            else:
-                raise ValueError(f"Unknown RoPE scaling type {scaling_type}")
+        self.rotary_emb = LlamaRotaryEmbedding(
+            self.head_dim, max_position_embeddings=self.max_position_embeddings,base=self.config.rope_theta
+        )
 
     def _shape(self, tensor: torch.Tensor, seq_len: int, bsz: int):
         return (

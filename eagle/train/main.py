@@ -67,28 +67,40 @@ from transformers import get_linear_schedule_with_warmup, AutoConfig
 if accelerator.is_main_process:
     import wandb
 
-    wandb.init(project="ess", entity="yuhui-li", config=train_config)
+    wandb.init(project="llama32-1b-eagle", config=train_config)
 
 baseconfig = AutoConfig.from_pretrained(args.basepath)
 
 head = torch.nn.Linear(baseconfig.hidden_size, baseconfig.vocab_size, bias=False)
 
 try:
-    with open(os.path.join(args.basepath, "model.safetensors.index.json"), "r") as f:
-        index_json = json.loads(f.read())
-        head_path = index_json["weight_map"]["lm_head.weight"]
+    if os.path.exists(os.path.join(args.basepath, "model.safetensors.index.json")):
+        with open(os.path.join(args.basepath, "model.safetensors.index.json"), "r") as f:
+            index_json = json.loads(f.read())
+            head_path = index_json["weight_map"]["lm_head.weight"]
+    else:
+        head_path = "model.safetensors"
     with safe_open(os.path.join(args.basepath, head_path),
                    framework="pt",
                    device="cpu") as f:
-        tensor_slice = f.get_slice("lm_head.weight")
+        if "tie_word_embeddings" in baseconfig:
+            tensor_slice = f.get_slice("model.embed_tokens.weight") # tied
+        else:
+            tensor_slice = f.get_slice("lm_head.weight")
         vocab_size, hidden_dim = tensor_slice.get_shape()
         tensor = tensor_slice[:, :hidden_dim].float()
 except:
-    with open(os.path.join(args.basepath, "pytorch_model.bin.index.json"), "r") as f:
-        index_json = json.loads(f.read())
-        head_path = index_json["weight_map"]["lm_head.weight"]
+    if os.path.exists(os.path.join(args.basepath, "pytorch_model.bin.index.json")):
+        with open(os.path.join(args.basepath, "pytorch_model.bin.index.json"), "r") as f:
+            index_json = json.loads(f.read())
+            head_path = index_json["weight_map"]["lm_head.weight"]
+    else:
+        head_path = "pytorch_model.bin"
     weights = torch.load(os.path.join(args.basepath, head_path))
-    tensor = weights["lm_head.weight"].float()
+    if "tie_word_embeddings" in baseconfig:
+        tensor = weights["model.embed_tokens.weight"].float() # tied
+    else:
+        tensor = weights["lm_head.weight"].float()
 
 head.weight.data = tensor
 head.eval()

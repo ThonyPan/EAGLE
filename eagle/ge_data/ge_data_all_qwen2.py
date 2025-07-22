@@ -16,7 +16,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 from datasets import load_dataset
 
 
-modelname="/home/lyh/weights/hf/qwen2chat/7B"
+modelname = os.environ["MODEL_PATH"]
 
 
 
@@ -38,7 +38,7 @@ def build_dataset_rank(
         tokenizer, split="train",
         select=None,
 ):
-    ds = load_dataset('json', data_files="/home/lyh/data/hf/Shargpt/ShareGPT_V4.3_unfiltered_cleaned_split.json")
+    ds = load_dataset('json', data_files="ShareGPT_V4.3_unfiltered_cleaned_split.json")
     ds = ds['train']
     ds = ds.shuffle(seed=42)
     ds1 = ds.select(range(args.start, args.end))
